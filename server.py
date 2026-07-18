@@ -1,9 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-import threading
 import queue
-import logging
 import asyncio
 import uuid
 import json
@@ -27,58 +25,6 @@ response_queue: asyncio.Queue | None = None
 response_lock = asyncio.Lock()         
 is_processing = False
 current_ui_model = "Qwen3.7-Plus"
-
-# 🛡️ THE MAGIC FIX: A thread-safe event to block the CLI until generation is done
-generation_done = threading.Event()
-generation_done.set() # Start in "done" state so the first prompt can be entered
-
-# --- CLI INPUT THREAD ---
-def cli_input_thread():
-    global current_ui_model
-    while True:
-        try:
-            # 🛑 BLOCK HERE: Wait until the previous LLM response is 100% finished
-            generation_done.wait()
-            
-            # Now it's safe to print the prompt
-            print("🤖 [YOU] >>> ", end="", flush=True)
-            user_input = input("").strip()
-            
-            if user_input.lower() == 'exit':
-                break
-                
-            if user_input.lower().startswith("/model "):
-                requested_model = user_input.split(" ", 1)[1].strip().lower()
-                target_ui_model = MODEL_MAP.get(requested_model)
-                
-                if target_ui_model:
-                    if target_ui_model != current_ui_model:
-                        current_ui_model = target_ui_model
-                        command_queue.put({"action": "switch_model", "model": target_ui_model})
-                        print(f"\n🔄 Switching UI to: {target_ui_model}...", flush=True)
-                    else:
-                        print(f"\nℹ️ UI is already set to {target_ui_model}.", flush=True)
-                else:
-                    print(f"\n❌ Unknown model. Available: {', '.join(MODEL_MAP.keys())}", flush=True)
-                continue
-
-            if user_input:
-                # 🛑 Mark that we are starting a new generation, so the next loop will block
-                generation_done.clear()
-                command_queue.put({"action": "send_prompt", "prompt": user_input})
-                
-        except EOFError:
-            break
-
-# Print the main banner BEFORE starting the thread to prevent uvicorn startup text overlap
-print("\n" + "="*60, flush=True)
-print("🟢 BRIDGE ACTIVE.", flush=True)
-print(f"🔑 API Key: {API_KEY}", flush=True)
-print("💡 Commands: /model <name> | Type text to prompt.", flush=True)
-print("="*60 + "\n", flush=True)
-
-# Start the CLI thread
-threading.Thread(target=cli_input_thread, daemon=True).start()
 
 # ==========================================
 # 📋 OPENAI MODEL DISCOVERY ENDPOINT
@@ -114,16 +60,14 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
 
     task_id = str(uuid.uuid4())
     
-    # 🧊 FREEZE API: Wait for UI to physically switch models before proceeding
+    # Switch UI model if needed
     if target_ui_model != current_ui_model:
         print(f"\n🔄 [API] Switching UI model to: {target_ui_model}... (Freezing)", flush=True)
         current_ui_model = target_ui_model
         command_queue.put({"action": "switch_model", "model": target_ui_model})
-        await asyncio.sleep(2.0) # Wait for browser to click and settle
+        await asyncio.sleep(2.0)  # Wait for browser to apply the switch
         print(f"✅ [API] Model switched. Forwarding prompt...", flush=True)
         
-    # Also block the CLI thread if an API call is made
-    generation_done.clear()
     command_queue.put({"action": "send_prompt", "prompt": prompt})
     print(f"\n📡 [API] Forwarding to browser (Model: {target_ui_model})...", flush=True)
 
@@ -177,16 +121,15 @@ async def receive_stream(request: Request):
     if data.get("type") == "stream":
         token = data["content"]
         print(token, end="", flush=True)
-        if response_queue is not None: await response_queue.put(token)
+        if response_queue is not None:
+            await response_queue.put(token)
             
     elif data.get("type") == "done":
         print("\n\n" + "="*60, flush=True)
         print("✅ QWEN FINISHED!", flush=True)
         print("="*60 + "\n", flush=True)
-        if response_queue is not None: await response_queue.put("[DONE]")
-        
-        # 🚀 UNBLOCK THE CLI THREAD: Generation is officially done!
-        generation_done.set()
+        if response_queue is not None:
+            await response_queue.put("[DONE]")
     
     return {"status": "ok"}
 
@@ -203,5 +146,4 @@ async def get_command():
 
 if __name__ == "__main__":
     import uvicorn
-    logging.getLogger("uvicorn.access").disabled = True
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
