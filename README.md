@@ -1,6 +1,6 @@
 # Qwen Studio OpenAI API Bridge
 
-A local OpenAI-compatible API bridge that allows AI coding agents (Cline, Roo Code, Continue.dev, Cursor, custom agents, etc.) to use Qwen Studio models through a local endpoint.
+A local OpenAI-compatible API bridge that allows AI coding agents (Cline, Roo Code, Continue.dev, Claude Code, Qwen Code, and so on...) to use Qwen Studio models through a local endpoint.
 
 The bridge exposes an OpenAI-style API (`/v1/chat/completions`, `/v1/models`) and forwards requests to Qwen Studio by controlling an authenticated browser session.
 
