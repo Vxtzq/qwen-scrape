@@ -66,17 +66,9 @@ You should see:
 🔑 API Key: sk-qwen-bridge-key
 ```
 
-### 2. Connect the Browser Session (Recommended: Tampermonkey)
+### 2. Connect the Browser Session
 
-Instead of pasting code into the console every time, automate it:
-
-1. Install the [Tampermonkey](https://www.tampermonkey.net/) extension in your browser.
-2. Click the Tampermonkey icon → **Create a new script**.
-3. Paste the contents of `browser_script.user.js` (provided in this repo).
-4. Save (`Ctrl+S` / `Cmd+S`).
-5. Open Qwen Studio. The script will automatically activate and connect to your local server. Keep this tab open.
-
-*(Fallback: If you don't use Tampermonkey, open DevTools `F12 → Console` in the Qwen tab and paste the raw JavaScript code manually).*
+Paste the content inside paste_in_chrome.js in the browser's console. That's all.
 
 ## API Configuration
 
