@@ -85,7 +85,7 @@ The bridge exposes its API on your local network. Find your local IP (e.g., `192
 | -------- | ------------------------------------ |
 | Base URL | `http://127.0.0.1:8000/v1` or `http://your_ip/v1`      |
 | API Key  | `sk-qwen-bridge-key`                 |
-| Model    | `qwen/qwen3.7-max` or `qwen/qwen3.7-plus` |
+| Model    | `qwen/qwen3.7-max` or `qwen/qwen3.7-plus` or `qwen/qwen3.6-plus`|
 
 ## Supported Clients
 
