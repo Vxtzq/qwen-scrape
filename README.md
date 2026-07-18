@@ -1,3 +1,5 @@
+# ⚠️⚠️ DISCLAIMER - I don't know if this is allowed. If it's not, please add an issue and i will remove this repo from github ⚠️⚠️
+
 # Qwen Studio OpenAI API Bridge
 
 A local OpenAI-compatible API bridge that allows AI coding agents (Cline, Roo Code, Continue.dev, Cursor, and custom Python agents) to use Qwen Studio models through a local network endpoint.
