@@ -60,7 +60,6 @@ python server.py
 ```
 You should see:
 ```text
-🚀 Starting God-Mode Bridge on http://0.0.0.0:8000
 🟢 GOD-MODE BRIDGE ACTIVE.
 🔑 API Key: sk-qwen-bridge-key
 ```
