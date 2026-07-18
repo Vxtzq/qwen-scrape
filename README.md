@@ -21,7 +21,7 @@ Coding Agent (VS Code, Python, etc.)
      |
      | OpenAI API format (HTTP)
      v
-Bridge Server (http://192.168.1.38:8000/v1)
+Bridge Server (http://127.0.0.1:8000/v1)
      |
      | Command Queue & Stream Relay
      v
