@@ -6,6 +6,8 @@ A local OpenAI-compatible API bridge that allows AI coding agents (Cline, Roo Co
 
 The bridge exposes an OpenAI-style API (`/v1/chat/completions`, `/v1/models`) and forwards requests to Qwen Studio by controlling an authenticated browser session through lightweight DOM and network automation.
 
+Vibe coded with Qwen btw 😜
+
 ## Features
 
 * ✅ Fully OpenAI-compatible API endpoint
