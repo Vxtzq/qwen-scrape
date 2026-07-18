@@ -62,7 +62,7 @@ python server.py
 ```
 You should see:
 ```text
-🟢 GOD-MODE BRIDGE ACTIVE.
+🟢 BRIDGE ACTIVE.
 🔑 API Key: sk-qwen-bridge-key
 ```
 
