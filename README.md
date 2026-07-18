@@ -1,254 +1,161 @@
 # Qwen Studio OpenAI API Bridge
 
-A local OpenAI-compatible API bridge that allows AI coding agents (Cline, Roo Code, Continue.dev, Claude Code, Qwen Code, and so on...) to use Qwen Studio models through a local endpoint.
+A local OpenAI-compatible API bridge that allows AI coding agents (Cline, Roo Code, Continue.dev, Cursor, and custom Python agents) to use Qwen Studio models through a local network endpoint.
 
-The bridge exposes an OpenAI-style API (`/v1/chat/completions`, `/v1/models`) and forwards requests to Qwen Studio by controlling an authenticated browser session.
+The bridge exposes an OpenAI-style API (`/v1/chat/completions`, `/v1/models`) and forwards requests to Qwen Studio by controlling an authenticated browser session via lightweight DOM/Network automation.
 
 ## Features
 
-* ✅ OpenAI-compatible API endpoint
-* ✅ Works with coding agents supporting custom OpenAI providers
-* ✅ Supports Qwen Studio web models
-* ✅ Streaming responses support
-* ✅ Local-only architecture
-* ✅ No model hosting required
+* ✅ Fully OpenAI-compatible API endpoint
+* ✅ Works seamlessly with coding agents supporting custom OpenAI providers
+* ✅ Supports dynamic Qwen Studio web model switching (e.g., Qwen3.7-Max, Qwen3.7-Plus)
+* ✅ Real-time streaming response support
+* ✅ Local-network architecture (accessible via `192.168.x.x`)
+* ✅ No local model hosting or GPU required
 * ✅ Compatible with OpenAI SDK / LangChain style clients
 
 ## Architecture
 
-```
-Coding Agent
+```text
+Coding Agent (VS Code, Python, etc.)
      |
-     | OpenAI API format
-     |
+     | OpenAI API format (HTTP)
      v
-http://127.0.0.1:8000/v1
+Bridge Server (http://192.168.1.38:8000/v1)
      |
-     | Bridge Server
-     |
+     | Command Queue & Stream Relay
      v
-Browser Automation
+Browser Automation (Tampermonkey / Console)
      |
+     | Native DOM Injection & Network Interception
      v
-Qwen Studio Web Interface
+Qwen Studio Web Interface (Authenticated Session)
 ```
 
 ## Requirements
 
 * Python 3.10+
-* A Qwen Studio account
-* Chromium-based browser
-* Logged-in Qwen Studio session
+* A valid, logged-in Qwen Studio session in a Chromium-based browser (Chrome, Edge, Brave)
+* Tampermonkey extension (Recommended) or manual Console access
 
 ## Installation
 
-Clone the repository:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-user/qwen-openai-bridge.git
+   cd qwen-openai-bridge
+   ```
 
-```bash
-git clone https://github.com/your-user/qwen-openai-bridge.git
-cd qwen-openai-bridge
-```
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
+2. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Usage
 
-### 1. Start the bridge server
+### 1. Start the Bridge Server
 
 ```bash
 python server.py
 ```
-
 You should see:
-
-```
-🟢 Qwen OpenAI Bridge ACTIVE
-Running on http://127.0.0.1:8000
-```
-
-### 2. Connect the browser session
-
-Open Qwen Studio in your browser.
-
-Open Developer Tools:
-
-```
-F12 → Console
+```text
+🚀 Starting God-Mode Bridge on http://0.0.0.0:8000
+🟢 GOD-MODE BRIDGE ACTIVE.
+🔑 API Key: sk-qwen-bridge-key
 ```
 
-Paste the provided browser automation script.
+### 2. Connect the Browser Session (Recommended: Tampermonkey)
 
-Keep the tab open while using the API.
+Instead of pasting code into the console every time, automate it:
+
+1. Install the [Tampermonkey](https://www.tampermonkey.net/) extension in your browser.
+2. Click the Tampermonkey icon → **Create a new script**.
+3. Paste the contents of `browser_script.user.js` (provided in this repo).
+4. Save (`Ctrl+S` / `Cmd+S`).
+5. Open Qwen Studio. The script will automatically activate and connect to your local server. Keep this tab open.
+
+*(Fallback: If you don't use Tampermonkey, open DevTools `F12 → Console` in the Qwen tab and paste the raw JavaScript code manually).*
 
 ## API Configuration
 
-The bridge exposes:
+The bridge exposes its API on your local network. Find your local IP (e.g., `192.168.1.38`) and configure your agents as follows:
 
-```
-http://127.0.0.1:8000/v1
-```
-
-Example configuration:
-
-| Setting  | Value                      |
-| -------- | -------------------------- |
-| Base URL | `http://127.0.0.1:8000/v1` |
-| API Key  | `sk-qwen-bridge-key`       |
-| Model    | `qwen/qwen3.7-max`         |
+| Setting  | Value                                |
+| -------- | ------------------------------------ |
+| Base URL | `http://192.168.1.38:8000/v1`        |
+| API Key  | `sk-qwen-bridge-key`                 |
+| Model    | `qwen/qwen3.7-max` or `qwen/qwen3.7-plus` |
 
 ## Supported Clients
 
-### Cline / Roo Code
-
-Provider:
-
-```
-OpenAI Compatible
-```
-
-Configuration:
-
-```
-Base URL:
-http://127.0.0.1:8000/v1
-
-API Key:
-sk-qwen-bridge-key
-
-Model:
-qwen/qwen3.7-max
-```
-
----
+### Cline / Roo Code (VS Code)
+1. Open Cline Settings → **API Provider**.
+2. Select **OpenAI Compatible**.
+3. Enter the Base URL, API Key, and Model ID from the table above.
+4. Click **Verify Connection**.
 
 ### Continue.dev
-
-Add a custom OpenAI-compatible model:
-
+Add to your `config.json`:
 ```json
 {
   "models": [
     {
-      "title": "Qwen Bridge",
+      "title": "Qwen Bridge (Max)",
       "provider": "openai",
       "model": "qwen/qwen3.7-max",
-      "apiBase": "http://127.0.0.1:8000/v1",
+      "apiBase": "http://192.168.1.38:8000/v1",
       "apiKey": "sk-qwen-bridge-key"
     }
   ]
 }
 ```
 
----
-
 ### Cursor
-
-Add a custom OpenAI-compatible model:
-
-```
-Name:
-Qwen Bridge
-
-Base URL:
-http://127.0.0.1:8000/v1
-
-API Key:
-sk-qwen-bridge-key
-
-Model:
-qwen/qwen3.7-max
-```
-
----
+1. Go to **Cursor Settings** → **Models**.
+2. Click **Add OpenAI Compatible Model**.
+3. Fill in the Name, Base URL, API Key, and Model Name.
 
 ## Python Example
-
-Using the OpenAI SDK:
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://127.0.0.1:8000/v1",
+    base_url="http://192.168.1.38:8000/v1",
     api_key="sk-qwen-bridge-key"
 )
 
 response = client.chat.completions.create(
     model="qwen/qwen3.7-max",
-    messages=[
-        {
-            "role": "user",
-            "content": "Explain this code"
-        }
-    ]
+    messages=[{"role": "user", "content": "Write a Python script to parse JSON."}],
+    stream=True
 )
 
-print(response.choices[0].message.content)
+for chunk in response:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
 ```
 
 ## Troubleshooting
 
-### Connection failed
+### Connection Failed
+* Ensure `server.py` is running.
+* Ensure the Qwen browser tab is open and the Tampermonkey script is active.
+* Verify your Base URL includes `/v1` (e.g., `http://192.168.1.38:8000/v1`).
 
-Check that:
-
-* `server.py` is running
-* The Qwen browser tab is open
-* The automation script is active
-* The API URL includes `/v1`
-
-Correct:
-
-```
-http://127.0.0.1:8000/v1
-```
-
-Incorrect:
-
-```
-http://127.0.0.1:8000
-```
-
----
-
-### Model not found
-
-Check:
-
-```
-GET http://127.0.0.1:8000/v1/models
-```
-
-The configured model name must match the returned ID.
-
-Example:
-
-```
-qwen/qwen3.7-max
-```
+### Model Not Found
+* Test the discovery endpoint in your browser: `http://192.168.1.38:8000/v1/models`
+* Ensure the `model` string in your agent exactly matches one of the returned `id` values (e.g., `qwen/qwen3.7-max`).
 
 ## Security Notes
 
-This project is intended for local use.
-
-Do not expose the bridge publicly without adding:
-
-* authentication
-* rate limiting
-* request validation
-* access controls
-
-Your browser session gives access to your Qwen account.
+⚠️ **This project is intended for local, trusted network use only.** 
+Do not expose port `8000` to the public internet. Your browser session contains authenticated access to your Qwen account. 
 
 ## Disclaimer
 
-This project interacts with a third-party web interface through browser automation.
-
-Use responsibly and respect the terms of service of the services you connect to.
+This project interacts with a third-party web interface through browser automation and network interception. Use responsibly and respect the Terms of Service of the platforms you connect to. This is an unofficial community tool.
 
 ## License
 
