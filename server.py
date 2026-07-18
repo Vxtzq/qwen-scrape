@@ -72,7 +72,7 @@ def cli_input_thread():
 
 # Print the main banner BEFORE starting the thread to prevent uvicorn startup text overlap
 print("\n" + "="*60, flush=True)
-print("🟢 GOD-MODE BRIDGE ACTIVE.", flush=True)
+print("🟢 BRIDGE ACTIVE.", flush=True)
 print(f"🔑 API Key: {API_KEY}", flush=True)
 print("💡 Commands: /model <name> | Type text to prompt.", flush=True)
 print("="*60 + "\n", flush=True)
