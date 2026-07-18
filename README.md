@@ -1,4 +1,4 @@
-# ⚠️⚠️ DISCLAIMER - I don't know if doing this is allowed. If it's not, please tell me and i will take down this repo ⚠️⚠️
+# ⚠️⚠️ DISCLAIMER - might be against Qwen's ToS, Use at your own risk ⚠️⚠️
 
 # Qwen Studio OpenAI API Bridge
 
