@@ -4,7 +4,7 @@
 
 A local OpenAI-compatible API bridge that allows AI coding agents (Cline, Roo Code, Continue.dev, Cursor, and custom Python agents) to use Qwen Studio models through a local network endpoint.
 
-The bridge exposes an OpenAI-style API (`/v1/chat/completions`, `/v1/models`) and forwards requests to Qwen Studio by controlling an authenticated browser session via lightweight DOM/Network automation.
+The bridge exposes an OpenAI-style API (`/v1/chat/completions`, `/v1/models`) and forwards requests to Qwen Studio by controlling an authenticated browser session through lightweight DOM and network automation.
 
 ## Features
 
@@ -27,7 +27,7 @@ Bridge Server (http://127.0.0.1:8000/v1)
      |
      | Command Queue & Stream Relay
      v
-Browser Automation (Tampermonkey / Console)
+Browser Automation Script (Console Injection)
      |
      | Native DOM Injection & Network Interception
      v
