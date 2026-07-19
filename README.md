@@ -155,9 +155,9 @@ for chunk in response:
 * Ensure the `model` string in your agent exactly matches one of the returned `id` values (e.g., `qwen/qwen3.7-max`).
 
 ## Limitations
-- based on a web interface, might not be as reliable as a standard paid API
-- reasonning content is not available to this day
-- slower than API
+- Based on a web interface, might not be as reliable as a standard paid API
+- Reasonning content is not available to this day
+- Might be slower than a standard LLM API
 
 ## Security Notes
 
