@@ -1,69 +1,59 @@
 // ==UserScript==
 // @name         Qwen OpenAI Bridge Automation
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Auto-connects Qwen Studio to the local OpenAI Bridge server
+// @version      3.2
+// @description  Fixed cumulative delta + multi-response filtering
 // @match        https://chat.qwenlm.ai/*
 // @match        https://qwenlm.ai/*
+// @match        https://chat.qwen.ai/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
 (() => {
-  console.log("🌌 [Tampermonkey] Initializing God-Mode Browser Puppeteer...");
-  
-  // CHANGE THIS IF YOUR SERVER IS ON A DIFFERENT IP
-  const SERVER_URL = "http://192.168.1.38:8000"; 
+  console.log("🌌 [Tampermonkey] Bridge v3.2 Active (Multi-Response Fix)");
+  const SERVER_URL = "http://127.0.0.1:8000"; 
   
   let isProcessingStream = false;
+  let primaryStreamActive = false; // 🎯 NOUVEAU: Tracker le flux principal
   let tokenBuffer = "";
   let flushInterval = null;
   let isSending = false;
+  let watchdog = null;
 
-  async function switchModelInUI(targetModelName) {
-    console.log(`🔄 UI: Attempting to switch model to: ${targetModelName}`);
-    const trigger = document.querySelector('[aria-label="Select Model"]');
-    if (!trigger) return console.error("❌ UI: Model selector trigger not found!");
-    
-    trigger.click();
-    await new Promise(r => setTimeout(r, 600));
+  function startWatchdog() {
+    stopWatchdog();
+    watchdog = setInterval(() => {
+      if (isProcessingStream) return;
+      console.error("❌ WATCHDOG: No stream activity.");
+      fetch(`${SERVER_URL}/qwen-stream`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "error", content: "Watchdog timeout" })
+      }).catch(() => {});
+      stopWatchdog();
+    }, 25000);
+  }
 
-    const options = document.querySelectorAll('[role="option"]');
-    let targetOption = null;
-    for (const opt of options) {
-      if (opt.innerText.includes(targetModelName)) {
-        targetOption = opt;
-        break;
-      }
-    }
-
-    if (targetOption) {
-      targetOption.click();
-      console.log(`✅ UI: Successfully switched to ${targetModelName}`);
-    } else {
-      console.error(`❌ UI: Model "${targetModelName}" not found in dropdown.`);
-      trigger.click();
-    }
-    await new Promise(r => setTimeout(r, 800));
+  function stopWatchdog() {
+    if (watchdog) { clearInterval(watchdog); watchdog = null; }
   }
 
   function typeAndSend(text) {
-    if (isSending) {
-      console.warn("⚠️ UI: Already sending, ignoring duplicate command.");
-      return;
-    }
+    if (isSending) return;
     isSending = true;
 
-    const textarea = document.querySelector('textarea.message-input-textarea');
+    const textarea = document.querySelector('textarea.message-input-textarea') || document.querySelector('textarea');
     if (!textarea) {
-      console.error("❌ UI: Textarea not found!");
+      console.error("❌ UI: Textarea not found.");
+      fetch(`${SERVER_URL}/qwen-stream`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "error", content: "Textarea not found" })
+      }).catch(() => {});
       isSending = false;
       return;
     }
 
-    console.log(`⌨️ UI: Injecting prompt...`);
     textarea.focus();
-    
     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
     nativeSetter.call(textarea, text);
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -71,19 +61,11 @@
     setTimeout(() => {
       const sendBtn = document.querySelector('button[aria-label="Send"]') || 
                       document.querySelector('button.send-button') ||
-                      Array.from(document.querySelectorAll('button')).find(b => 
-                        !b.disabled && b.querySelector('svg') && b.getBoundingClientRect().width > 0
-                      );
+                      Array.from(document.querySelectorAll('button')).find(b => !b.disabled && b.querySelector('svg'));
                       
-      if (sendBtn && !sendBtn.disabled) {
-        sendBtn.click();
-        console.log("✅ UI: Send button clicked.");
-      } else {
-        console.warn("⚠️ UI: Send button not found. Fallback to Enter key.");
-        textarea.dispatchEvent(new KeyboardEvent('keydown', {
-          key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true, cancelable: true
-        }));
-      }
+      if (sendBtn && !sendBtn.disabled) sendBtn.click();
+      else textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+      
       setTimeout(() => { isSending = false; }, 1500);
     }, 100);
   }
@@ -92,13 +74,11 @@
     try {
       const res = await fetch(`${SERVER_URL}/pending-command`);
       const data = await res.json();
-      
-      if (data.action === "switch_model") {
-        await switchModelInUI(data.model);
-      } else if (data.action === "send_prompt") {
+      if (data.action === "send_prompt") {
+        startWatchdog();
         typeAndSend(data.prompt);
       }
-    } catch (e) { /* Ignore network hiccups */ }
+    } catch (e) {}
   }, 1000);
 
   function startFlushing() {
@@ -120,12 +100,13 @@
       fetch(`${SERVER_URL}/qwen-stream`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "stream", content: tokenBuffer })
-      }); tokenBuffer = "";
+      }).catch(() => {}); 
+      tokenBuffer = "";
     }
     fetch(`${SERVER_URL}/qwen-stream`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: "done", content: "" })
-    });
+    }).catch(() => {});
   }
 
   const originalFetch = window.fetch;
@@ -134,38 +115,82 @@
     const clone = response.clone();
     const url = (typeof args[0] === 'string') ? args[0] : args[0]?.url || '';
     
-    if ((url.includes('/chat/completions') || url.includes('/api/chat')) && !isProcessingStream) {
-      processAndForwardStream(clone);
+    // 🎯 FIX: N'intercepter que le premier flux, ignorer les réponses alternatives
+    if ((url.includes('/chat/completions') || url.includes('/api/chat') || url.includes('/v1/chat'))) {
+      if (!primaryStreamActive) {
+        primaryStreamActive = true; // Verrouiller pour ignorer les flux suivants
+        processAndForwardStream(clone);
+      } else {
+        console.log("🚫 [JS] Ignoring secondary/alternative response stream");
+      }
     }
     return response;
   };
 
   async function processAndForwardStream(response) {
     isProcessingStream = true;
+    tokenBuffer = "";
+    
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = ""; let isActive = true;
+    let buffer = ""; 
+    let isActive = true;
+    
+    let lastUpstreamContent = "";
+    let isCumulative = null;
+
     startFlushing();
 
     while (isActive) {
       const { done, value } = await reader.read();
-      if (done) { isActive = false; isProcessingStream = false; stopFlushing(); break; }
+      if (done) { 
+        isActive = false; 
+        isProcessingStream = false; 
+        primaryStreamActive = false; // 🎯 Libérer le verrou
+        stopFlushing(); 
+        break; 
+      }
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n'); buffer = lines.pop();
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const jsonData = line.substring(6).trim();
-          if (jsonData === '[DONE]') { isActive = false; isProcessingStream = false; stopFlushing(); break; }
+          if (jsonData === '[DONE]') { 
+            isActive = false; 
+            isProcessingStream = false; 
+            primaryStreamActive = false; // 🎯 Libérer le verrou
+            stopFlushing(); 
+            break; 
+          }
           try {
             const parsed = JSON.parse(jsonData);
-            const delta = parsed.choices?.[0]?.delta?.content;
-            if (delta) tokenBuffer += delta;
+            const upstreamContent = parsed.choices?.[0]?.delta?.content;
+            
+            if (upstreamContent && typeof upstreamContent === 'string') {
+              if (isCumulative === null && lastUpstreamContent.length > 0) {
+                isCumulative = upstreamContent.startsWith(lastUpstreamContent);
+              }
+
+              let trueDelta = upstreamContent;
+              
+              if (isCumulative === true) {
+                trueDelta = upstreamContent.slice(lastUpstreamContent.length);
+              }
+
+              if (trueDelta) {
+                tokenBuffer += trueDelta;
+              }
+
+              if (isCumulative === true) {
+                lastUpstreamContent = upstreamContent;
+              } else if (isCumulative === null) {
+                lastUpstreamContent = upstreamContent;
+              }
+            }
           } catch (e) {}
         }
       }
     }
   }
-
-  console.log("✅ God-Mode Puppeteer Active. Ready for commands & API calls.");
 })();
