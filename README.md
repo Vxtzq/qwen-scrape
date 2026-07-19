@@ -14,7 +14,7 @@ Vibe coded with Qwen btw 😜
 * ✅ Works seamlessly with coding agents supporting custom OpenAI providers
 * ✅ Supports dynamic Qwen Studio web model switching (e.g., Qwen3.7-Max, Qwen3.7-Plus)
 * ✅ Real-time streaming response support
-* ✅ Local-network architecture (accessible via `192.168.x.x`)
+* ✅ Localhost (accessible from `127.0.0.1`)
 * ✅ No local model hosting or GPU required
 * ✅ Compatible with OpenAI SDK / LangChain style clients
 
@@ -46,7 +46,7 @@ Qwen Studio Web Interface (Authenticated Session)
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-user/qwen-openai-bridge.git
+   git clone https://github.com/Vxtzq/qwen-scrape.git
    cd qwen-openai-bridge
    ```
 
@@ -78,11 +78,22 @@ The bridge exposes its API on your local network. Find your local IP (e.g., `192
 
 | Setting  | Value                                |
 | -------- | ------------------------------------ |
-| Base URL | `http://127.0.0.1:8000/v1` or `http://your_ip/v1`      |
+| Base URL | `http://127.0.0.1:8000/v1`           |
 | API Key  | `sk-qwen-bridge-key`                 |
-| Model    | `qwen/qwen3.7-max` or `qwen/qwen3.7-plus` or `qwen/qwen3.6-plus`|
+| Model    | `qwen/qwen3.7-max` or `qwen/qwen3.7-plus` or `qwen/qwen3.8-max`|
 
 ## Supported Clients
+
+### Claude code / Qwen code
+1. Type /auth
+2. Select "Custom provider"
+3. Select "OpenAI-Compatible"
+4. Enter `http://127.0.0.1:8000/v1`
+5. Enter `sk-qwen-bridge-key`
+6. Add models (`qwen/qwen3.7-max` or/and `qwen/qwen3.7-plus` or/and `qwen/qwen3.8-max`)
+7. Press enter (don't enable thinking, modality...)
+8. Enjoy!
+
 
 ### Cline / Roo Code (VS Code)
 1. Open Cline Settings → **API Provider**.
