@@ -154,6 +154,11 @@ for chunk in response:
 * Test the discovery endpoint in your browser: `http://192.168.1.38:8000/v1/models`
 * Ensure the `model` string in your agent exactly matches one of the returned `id` values (e.g., `qwen/qwen3.7-max`).
 
+## Limitations
+- based on a web interface, might not be as reliable as a standard paid API
+- reasonning content is not available to this day
+- slower than API
+
 ## Security Notes
 
 ⚠️ **This project is intended for local, trusted network use only.** 
