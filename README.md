@@ -1,6 +1,7 @@
 ### ⚠️ DISCLAIMER - This might be against Qwen Studio ToS, Use at your own risk ⚠️
 ![Qwen-Scrape](https://github.com/Vxtzq/qwen-scrape/blob/main/title.png)
-#Qwen-Scrape
+# Qwen-Scrape
+
 A local OpenAI-compatible API bridge that allows AI coding agents (Cline, Roo Code, Continue.dev, Cursor, and custom Python agents) to use Qwen Studio models through a local network endpoint.
 
 The bridge exposes an OpenAI-style API (`/v1/chat/completions`, `/v1/models`) and forwards requests to Qwen Studio by controlling an authenticated browser session through lightweight DOM and network automation.
