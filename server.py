@@ -133,8 +133,7 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
 
             try:
                 # Chunk 0 : rôle
-                yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
-
+                
                 # ✅ THINKING INSTANTANÉ : émis par le serveur AVANT toute donnée du navigateur
                 # ✅ THINKING INSTANTANÉ : émis par le serveur AVANT toute donnée du navigateur
                 yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': ' '}, 'finish_reason': None}]})}\n\n"
