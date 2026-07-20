@@ -8,10 +8,9 @@ import json
 import re
 import ast
 
-app = FastAPI(title="Qwen God-Mode Bridge", version="5.1")
+app = FastAPI(title="Qwen God-Mode Bridge", version="5.6")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# --- CONFIGURATION ---
 API_KEY = "sk-qwen-bridge-key"
 
 MODEL_MAP = {
@@ -21,20 +20,16 @@ MODEL_MAP = {
     "default": "Qwen3.7-Plus", "generic": "Qwen3.7-Plus"
 }
 
-# --- STATE MANAGEMENT ---
-command_queue = queue.Queue()          
-response_queue: asyncio.Queue | None = None  
-response_lock = asyncio.Lock()         
+command_queue = queue.Queue()
+response_queue: asyncio.Queue | None = None
+response_lock = asyncio.Lock()
 is_processing = False
 current_ui_model = "Qwen3.7-Plus"
 
-# ==========================================
-# 🧠 UNIVERSAL TOOL ABSTRACTION LAYER
-# ==========================================
 TOOL_SYSTEM_PROMPT = """
-You are a precise tool-calling engine. 
+You are a precise tool-calling engine.
 When you need to use a tool, you MUST respond with one or more <tool_call> blocks.
-Format: <tool_call>{"name": "tool_name", "arguments": {"param": "value"}}</tool_call>
+Format:  <tool_call>{"name": "tool_name", "arguments": {"param": "value"}}</tool_call>
 """.strip()
 
 def _parse_json_robust(s: str):
@@ -56,9 +51,16 @@ def _process_candidate(candidate, allowed_tools, result_list, seen_names):
         if isinstance(args, str):
             parsed_args = _parse_json_robust(args)
             args_str = json.dumps(parsed_args if parsed_args else {"raw": args}, ensure_ascii=False)
-        else: args_str = json.dumps(args, ensure_ascii=False)
-    except Exception: args_str = "{}"
-    result_list.append({"id": f"call_{uuid.uuid4().hex[:8]}", "type": "function", "function": {"name": name, "arguments": args_str}})
+        else:
+            args_str = json.dumps(args, ensure_ascii=False)
+    except Exception:
+        args_str = "{}"
+    result_list.append({
+        "index": len(result_list),
+        "id": f"call_{uuid.uuid4().hex[:8]}",
+        "type": "function",
+        "function": {"name": name, "arguments": args_str}
+    })
     seen_names.add(name)
 
 def convert_llm_output_to_openai_tool_calls(text: str, allowed_tools: list = None):
@@ -73,30 +75,24 @@ def clean_text_from_tool_calls(text: str) -> str:
     text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL | re.IGNORECASE)
     return re.sub(r"<tool_use>.*?</tool_use>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
 
-# ==========================================
-# 📋 OPENAI MODEL DISCOVERY ENDPOINT
-# ==========================================
 @app.get("/v1/models")
 async def list_models():
-    models = [{"id": api_name, "object": "model", "created": 1677652288, "owned_by": "qwen-bridge"} for api_name in MODEL_MAP.keys()]
+    models = [{"id": k, "object": "model", "created": 1677652288, "owned_by": "qwen-bridge"} for k in MODEL_MAP.keys()]
     return {"object": "list", "data": models}
 
-# ==========================================
-# 🌟 OPENAI CHAT COMPLETIONS ENDPOINT
-# ==========================================
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request, authorization: str = Header(None)):
     global is_processing, response_queue, current_ui_model
-    
+
     if authorization != f"Bearer {API_KEY}":
         raise HTTPException(status_code=401, detail="Invalid API Key")
-        
+
     data = await request.json()
     messages = data.get("messages", [])
-    stream = data.get("stream", True) # Default to True for better UX
+    stream = data.get("stream", True)
     requested_model = data.get("model", "qwen/generic")
     tools = data.get("tools", [])
-    
+
     has_tools = bool(tools)
     allowed_tool_names = [t["function"]["name"] for t in tools] if has_tools else []
 
@@ -122,52 +118,83 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
         current_ui_model = target_ui_model
         command_queue.put({"action": "switch_model", "model": target_ui_model})
         await asyncio.sleep(2.0)
-        
-    command_queue.put({"action": "send_prompt", "prompt": prompt})
-    print(f"\n📡 [API] Forwarding to browser (Model: {target_ui_model}, Stream: {stream})...", flush=True)
 
-    # 🎯 MODE STREAMING (Temps réel)
+    command_queue.put({"action": "send_prompt", "prompt": prompt})
+    print(f"\n📡 [API] Forwarding to browser (Model: {target_ui_model}, Stream: {stream}, HasTools: {has_tools})...", flush=True)
+
+    # 🎯 MODE STREAMING
     if stream:
         async def event_generator():
-            # 🛠️ FIX CRUCIAL : Déclarer les variables globales modifiées dans cette fonction imbriquée
-            global response_queue, is_processing 
-            
-            full_text = ""
+            global response_queue, is_processing
+
+            content_buffer = ""
+            has_function_call = False
+            current_tool_call_id = None
+
             try:
-                # 1. Chunk initial (rôle)
+                # Chunk 0 : rôle
                 yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
-                
-                # 2. Boucle de streaming en temps réel
+
+                # ✅ THINKING INSTANTANÉ : émis par le serveur AVANT toute donnée du navigateur
+                # ✅ THINKING INSTANTANÉ : émis par le serveur AVANT toute donnée du navigateur
+                yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': ' '}, 'finish_reason': None}]})}\n\n"
+
+                # ✅ FORCE LE FLUSH IMMÉDIAT du premier chunk
+                await asyncio.sleep(0)
+
                 while True:
                     token_data = await asyncio.wait_for(response_queue.get(), timeout=120.0)
                     if token_data.get("type") == "done":
                         break
-                    
+
                     if token_data.get("type") == "reasoning":
                         text = token_data["text"]
-                        full_text += text
-                        # 🧠 Envoi du chunk de raisonnement (Standard OpenAI)
+                        # Remplacer le ⏳ initial par le vrai reasoning dès qu'il arrive
                         yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': text}, 'finish_reason': None}]})}\n\n"
-                        
+
                     elif token_data.get("type") == "content":
                         text = token_data["text"]
-                        full_text += text
-                        # 📝 Envoi du chunk de réponse
+                        content_buffer += text
                         yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'content': text}, 'finish_reason': None}]})}\n\n"
-                
-                # 3. Vérification des Tool Calls à la fin du stream (si demandé)
+
+                    elif token_data.get("type") == "function_call":
+                        has_function_call = True
+                        name = token_data.get("name", "")
+                        args = token_data.get("arguments", "")
+
+                        if name and not current_tool_call_id:
+                            current_tool_call_id = f"call_{uuid.uuid4().hex[:24]}"
+                            tool_call_chunk = {
+                                "index": 0,
+                                "id": current_tool_call_id,
+                                "type": "function",
+                                "function": {"name": name, "arguments": args or ""}
+                            }
+                        else:
+                            tool_call_chunk = {
+                                "index": 0,
+                                "function": {"arguments": args}
+                            }
+
+                        yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'content': None, 'tool_calls': [tool_call_chunk]}, 'finish_reason': None}]})}\n\n"
+
+                # Fin du stream
+                if has_function_call:
+                    yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'tool_calls'}]})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+
                 if has_tools:
-                    openai_tool_calls = convert_llm_output_to_openai_tool_calls(full_text, allowed_tools=allowed_tool_names)
+                    openai_tool_calls = convert_llm_output_to_openai_tool_calls(content_buffer, allowed_tools=allowed_tool_names)
                     if openai_tool_calls:
-                        print(f"✅ [API] {len(openai_tool_calls)} tool call(s) detected at the end of stream.", flush=True)
-                        yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'tool_calls': openai_tool_calls}, 'finish_reason': 'tool_calls'}]})}\n\n"
+                        print(f"✅ [API] {len(openai_tool_calls)} tool call(s) detected (text fallback).", flush=True)
+                        yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'content': None, 'tool_calls': openai_tool_calls}, 'finish_reason': 'tool_calls'}]})}\n\n"
                         yield "data: [DONE]\n\n"
                         return
 
-                # 4. Chunk final (stop)
                 yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
                 yield "data: [DONE]\n\n"
-                
+
             except asyncio.TimeoutError:
                 print("⚠️ [API] Timeout 120s", flush=True)
                 yield "data: [DONE]\n\n"
@@ -175,10 +202,10 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
                 async with response_lock:
                     is_processing = False
                     response_queue = None
-                    
+
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-    # 🎯 MODE NON-STREAMING (Attend la fin pour parser les outils)
+    # 🎯 MODE NON-STREAMING
     else:
         full_response = ""
         try:
@@ -208,43 +235,43 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
             "choices": [{"index": 0, "message": {"role": "assistant", "content": clean_text}, "finish_reason": "stop"}]
         }
 
-# ==========================================
-# 📥 BROWSER STREAM RECEIVER
-# ==========================================
 @app.post("/qwen-stream")
 async def receive_stream(request: Request):
     global response_queue
     data = await request.json()
-    
+
     if data.get("type") == "stream":
         content = data.get("content", "")
         reasoning = data.get("reasoning", "")
-        
         if response_queue is not None:
             if reasoning:
-                print(f"🧠 [Server] Received reasoning chunk ({len(reasoning)} chars)", flush=True)
+                print(f"🧠 [Server] Received reasoning ({len(reasoning)} chars)", flush=True)
                 await response_queue.put({"type": "reasoning", "text": reasoning})
             if content:
-                print(f"📝 [Server] Received content chunk ({len(content)} chars)", flush=True)
+                print(f"📝 [Server] Received content ({len(content)} chars)", flush=True)
                 await response_queue.put({"type": "content", "text": content})
-            
+
+    elif data.get("type") == "function_call":
+        name = data.get("name", "")
+        args = data.get("arguments", "")
+        if response_queue is not None:
+            print(f"🔧 [Server] Received function_call: {name}", flush=True)
+            await response_queue.put({"type": "function_call", "name": name, "arguments": args})
+
     elif data.get("type") == "done":
         print("\n" + "="*60, flush=True)
         print("✅ QWEN FINISHED!", flush=True)
         print("="*60 + "\n", flush=True)
         if response_queue is not None:
             await response_queue.put({"type": "done"})
-            
+
     elif data.get("type") == "error":
         print(f"\n❌ [API] BROWSER ERROR: {data.get('content')}", flush=True)
         if response_queue is not None:
             await response_queue.put({"type": "done"})
-    
+
     return {"status": "ok"}
 
-# ==========================================
-# 📤 BROWSER COMMAND POLLER
-# ==========================================
 @app.get("/pending-command")
 async def get_command():
     try: return command_queue.get_nowait()
@@ -252,4 +279,4 @@ async def get_command():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info") # Mis à info pour voir les prints
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
