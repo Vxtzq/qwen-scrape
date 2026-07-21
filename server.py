@@ -8,16 +8,14 @@ import json
 import re
 import ast
 
-app = FastAPI(title="Qwen God-Mode Bridge", version="5.6")
+app = FastAPI(title="Qwen God-Mode Bridge", version="5.7")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 API_KEY = "sk-qwen-bridge-key"
 
 MODEL_MAP = {
-    "qwen/qwen3.7-plus": "Qwen3.7-Plus", "qwen/qwen3.7-max": "Qwen3.7-Max", "qwen/qwen3.6-plus": "Qwen3.6-Plus", "qwen/generic": "Qwen3.7-Plus",
-    "qwen3.7-plus": "Qwen3.7-Plus", "qwen3.7-max": "Qwen3.7-Max", "qwen3.6-plus": "Qwen3.6-Plus",
-    "qwen-plus": "Qwen3.7-Plus", "qwen-max": "Qwen3.7-Max", "qwen3-plus": "Qwen3.7-Plus", "qwen3-max": "Qwen3.7-Max",
-    "default": "Qwen3.7-Plus", "generic": "Qwen3.7-Plus"
+    "qwen/qwen3.7-plus": "Qwen3.7-Plus", "qwen/qwen3.7-max": "Qwen3.7-Max","qwen/generic": "Qwen3.7-Plus",
+    "qwen/qwen3.8-max": "Qwen3.8-Max-Preview",
 }
 
 command_queue = queue.Queue()
@@ -25,6 +23,9 @@ response_queue: asyncio.Queue | None = None
 response_lock = asyncio.Lock()
 is_processing = False
 current_ui_model = "Qwen3.7-Plus"
+
+# ✅ NOUVEAU : état du mode raisonnement (assume Think au démarrage, ajuste si ton UI démarre en Fast)
+current_reasoning_mode = "Think"
 
 TOOL_SYSTEM_PROMPT = """
 You are a precise tool-calling engine.
@@ -75,6 +76,30 @@ def clean_text_from_tool_calls(text: str) -> str:
     text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL | re.IGNORECASE)
     return re.sub(r"<tool_use>.*?</tool_use>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
 
+# ✅ NOUVEAU : résolution du mode Fast/Think à partir de la requête OpenAI-like
+def resolve_reasoning_mode(data: dict, requested_model: str) -> str:
+    # 1. Convention OpenAI o-series : reasoning_effort = "none" -> Fast, sinon Think
+    effort = data.get("reasoning_effort")
+    if effort is not None:
+        return "Fast" if str(effort).lower() in ("none", "off", "minimal", "disabled") else "Think"
+
+    # 2. Convention custom : reasoning=True/False, ou objet {"type": "enabled"/"disabled"} (façon Anthropic)
+    reasoning_flag = data.get("reasoning")
+    if isinstance(reasoning_flag, bool):
+        return "Think" if reasoning_flag else "Fast"
+    if isinstance(reasoning_flag, dict):
+        return "Fast" if reasoning_flag.get("type") == "disabled" else "Think"
+
+    # 3. Fallback : suffixe dans le nom du modèle, ex: "qwen/generic-fast" ou "qwen/generic:thinking"
+    lower_model = (requested_model or "").lower()
+    if "fast" in lower_model:
+        return "Fast"
+    if "think" in lower_model or "reasoning" in lower_model:
+        return "Think"
+
+    # 4. Défaut rétrocompatible : on ne change rien, reasoning reste actif
+    return "Think"
+
 @app.get("/v1/models")
 async def list_models():
     models = [{"id": k, "object": "model", "created": 1677652288, "owned_by": "qwen-bridge"} for k in MODEL_MAP.keys()]
@@ -82,7 +107,7 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request, authorization: str = Header(None)):
-    global is_processing, response_queue, current_ui_model
+    global is_processing, response_queue, current_ui_model, current_reasoning_mode
 
     if authorization != f"Bearer {API_KEY}":
         raise HTTPException(status_code=401, detail="Invalid API Key")
@@ -106,6 +131,7 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
 
     prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
     target_ui_model = MODEL_MAP.get(requested_model, "Qwen3.7-Plus")
+    target_reasoning_mode = resolve_reasoning_mode(data, requested_model)
     task_id = str(uuid.uuid4())
 
     async with response_lock:
@@ -119,8 +145,15 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
         command_queue.put({"action": "switch_model", "model": target_ui_model})
         await asyncio.sleep(2.0)
 
+    # ✅ NOUVEAU : switch Fast/Think si nécessaire, avant l'envoi du prompt
+    if target_reasoning_mode != current_reasoning_mode:
+        print(f"🧠 [API] Switching reasoning mode to: {target_reasoning_mode}...", flush=True)
+        current_reasoning_mode = target_reasoning_mode
+        command_queue.put({"action": "switch_reasoning_mode", "mode": target_reasoning_mode})
+        await asyncio.sleep(1.0)
+
     command_queue.put({"action": "send_prompt", "prompt": prompt})
-    print(f"\n📡 [API] Forwarding to browser (Model: {target_ui_model}, Stream: {stream}, HasTools: {has_tools})...", flush=True)
+    print(f"\n📡 [API] Forwarding to browser (Model: {target_ui_model}, Reasoning: {target_reasoning_mode}, Stream: {stream}, HasTools: {has_tools})...", flush=True)
 
     # 🎯 MODE STREAMING
     if stream:
@@ -132,13 +165,7 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
             current_tool_call_id = None
 
             try:
-                # Chunk 0 : rôle
-                
-                # ✅ THINKING INSTANTANÉ : émis par le serveur AVANT toute donnée du navigateur
-                # ✅ THINKING INSTANTANÉ : émis par le serveur AVANT toute donnée du navigateur
                 yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': ' '}, 'finish_reason': None}]})}\n\n"
-
-                # ✅ FORCE LE FLUSH IMMÉDIAT du premier chunk
                 await asyncio.sleep(0)
 
                 while True:
@@ -148,7 +175,6 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
 
                     if token_data.get("type") == "reasoning":
                         text = token_data["text"]
-                        # Remplacer le ⏳ initial par le vrai reasoning dès qu'il arrive
                         yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': text}, 'finish_reason': None}]})}\n\n"
 
                     elif token_data.get("type") == "content":
@@ -177,7 +203,6 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
 
                         yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'content': None, 'tool_calls': [tool_call_chunk]}, 'finish_reason': None}]})}\n\n"
 
-                # Fin du stream
                 if has_function_call:
                     yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'tool_calls'}]})}\n\n"
                     yield "data: [DONE]\n\n"
