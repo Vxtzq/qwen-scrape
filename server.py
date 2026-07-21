@@ -7,7 +7,9 @@ import uuid
 import json
 import re
 import ast
+from collections import deque
 
+recent_prompts = deque(maxlen=5)  # liste de (prompt_text, response_text)
 app = FastAPI(title="Qwen God-Mode Bridge", version="5.7")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -30,7 +32,21 @@ current_reasoning_mode = "Think"
 TOOL_SYSTEM_PROMPT = """
 You are a precise tool-calling engine.
 When you need to use a tool, you MUST respond with one or more <tool_call> blocks.
-Format:  <tool_call>{"name": "tool_name", "arguments": {"param": "value"}}</tool_call>
+
+STRICT FORMAT RULES:
+1. The content inside <tool_call> MUST be a strictly valid JSON object.
+2. DO NOT use XML tags (like <tool_name> or <content>) inside the block.
+3. DO NOT wrap the JSON in markdown code blocks (no ```json ... ```).
+4. The JSON object must have exactly two keys: "name" (string) and "arguments" (object).
+
+Correct Example:
+<tool_call>{"name": "write_file", "arguments": {"file_path": "/home/user/test.py", "content": "print('hello')\n"}}</tool_call>
+
+Incorrect Example (FORBIDDEN - DO NOT DO THIS):
+<tool_call>
+    <tool_name>write_file</tool_name>
+    <content>print('hello')</content>
+</tool_call>
 """.strip()
 
 def _parse_json_robust(s: str):
@@ -130,9 +146,28 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
         else: messages.insert(0, {"role": "system", "content": tool_prompt.strip()})
 
     prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+    
+    prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
     target_ui_model = MODEL_MAP.get(requested_model, "Qwen3.7-Plus")
     target_reasoning_mode = resolve_reasoning_mode(data, requested_model)
     task_id = str(uuid.uuid4())
+
+    # ✅ DÉDUP SAUVAGE : si ce prompt exact a déjà été traité récemment, on renvoie
+    # directement la réponse en cache SANS jamais retaper dans l'UI Qwen.
+    for cached_prompt, cached_response in recent_prompts:
+        if cached_prompt == prompt:
+            print(f"♻️ [API] Duplicate prompt detected, returning cached response ({len(cached_response)} chars)", flush=True)
+            if stream:
+                async def cached_generator():
+                    yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': cached_response}, 'finish_reason': None}]})}\n\n"
+                    yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
+                    yield "data: [DONE]\n\n"
+                return StreamingResponse(cached_generator(), media_type="text/event-stream")
+            else:
+                return {
+                    "id": f"chatcmpl-{task_id}", "object": "chat.completion", "created": 1677652288, "model": requested_model,
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": cached_response}, "finish_reason": "stop"}]
+                }
 
     async with response_lock:
         if is_processing: raise HTTPException(status_code=429, detail="Bridge is busy.")
@@ -216,6 +251,9 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
                         yield "data: [DONE]\n\n"
                         return
 
+                # ✅ Succès normal (pas de tool call) : on met en cache ICI, dans le bon scope
+                recent_prompts.append((prompt, content_buffer))
+
                 yield f"data: {json.dumps({'id': f'chatcmpl-{task_id}', 'object': 'chat.completion.chunk', 'created': 1677652288, 'model': requested_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
                 yield "data: [DONE]\n\n"
 
@@ -253,7 +291,9 @@ async def chat_completions(request: Request, authorization: str = Header(None)):
                     "choices": [{"index": 0, "message": {"role": "assistant", "content": None, "tool_calls": openai_tool_calls}, "finish_reason": "tool_calls"}]
                 }
 
+        
         clean_text = clean_text_from_tool_calls(full_response)
+        recent_prompts.append((prompt, clean_text))
         return {
             "id": f"chatcmpl-{task_id}", "object": "chat.completion", "created": 1677652288, "model": requested_model,
             "choices": [{"index": 0, "message": {"role": "assistant", "content": clean_text}, "finish_reason": "stop"}]
