@@ -72,6 +72,12 @@ You should see:
 
 Paste the content inside paste_in_chrome.js in the browser's console. That's all.
 
+### 3. Test everything works
+
+```bash
+python benchmark_api.py
+```
+
 ## API Configuration
 
 The bridge exposes its API on your local network. Find your local IP (e.g., `192.168.1.38`) and configure your agents as follows:
