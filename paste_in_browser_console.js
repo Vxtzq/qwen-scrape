@@ -181,7 +181,8 @@
 
   async function processAndForwardStream(response, genId) {
     if (genId !== currentGenerationId) return;
-
+    // tout en haut de processAndForwardStream, avec les autres let
+    let lockedChoiceIndex = null;
     isProcessingStream = true;
     contentBuffer = ""; reasoningBuffer = "";
 
@@ -220,6 +221,17 @@
             const parsed = JSON.parse(jsonData);
             const delta = parsed.choices?.[0]?.delta;
             if (!delta) continue;
+            const choiceIndex = parsed.choices?.[0]?.index ?? 0;
+
+if (lockedChoiceIndex === null) {
+  lockedChoiceIndex = choiceIndex;
+  console.log(`🔒 [JS] Locked onto choice index=${lockedChoiceIndex}`);
+}
+
+if (choiceIndex !== lockedChoiceIndex) {
+  // C'est la 2e réponse candidate (feature "quel message préférez-vous") -> on l'ignore intégralement
+  continue;
+}
 
             if (delta?.phase === "thinking_summary") {
               isThinking = true;
