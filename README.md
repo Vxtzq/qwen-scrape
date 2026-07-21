@@ -91,7 +91,7 @@ The bridge exposes its API on your local network. Find your local IP (e.g., `192
 4. Enter `http://127.0.0.1:8000/v1`
 5. Enter `sk-qwen-bridge-key`
 6. Add models (`qwen/qwen3.7-max` or/and `qwen/qwen3.7-plus` or/and `qwen/qwen3.8-max`)
-7. Press enter (don't enable thinking, modality...)
+7. Press enter (you can enable thinking...)
 8. Enjoy!
 
 
