@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Qwen OpenAI Bridge + Reasoning Extractor
 // @namespace    http://tampermonkey.net/
-// @version      4.9
-// @description  Immediate thinking, clean tool_call streaming, no content leak
+// @version      5.0
+// @description  Immediate thinking, clean tool_call streaming, model switch, Fast/Think switch
 // @match        https://chat.qwen.ai/*
 // @match        https://qwenlm.ai/*
 // @match        https://chat.qwenlm.ai/*
@@ -11,7 +11,7 @@
 // ==/UserScript==
 
 (() => {
-  console.log("🌌🧠 [Tampermonkey] Bridge v4.9 Active");
+  console.log("🌌🧠 [Tampermonkey] Bridge v5.0 Active");
   const SERVER_URL = "http://127.0.0.1:8000";
 
   let isProcessingStream = false;
@@ -57,11 +57,77 @@
     }, 100);
   }
 
+  // ✅ RESTAURÉ : switch de modèle (avait disparu en v4.9)
+  async function switchModelInUI(targetModelName) {
+    console.log(`🔄 UI: Switching model to: ${targetModelName}`);
+    const trigger = document.querySelector('[aria-label="Select Model"]');
+    if (!trigger) { console.error("❌ UI: Model selector trigger not found!"); return; }
+
+    trigger.click();
+    await new Promise(r => setTimeout(r, 600));
+
+    const options = document.querySelectorAll('[role="option"]');
+    let targetOption = null;
+    for (const opt of options) {
+      if (opt.innerText.includes(targetModelName)) { targetOption = opt; break; }
+    }
+
+    if (targetOption) {
+      targetOption.click();
+      console.log(`✅ UI: Switched to ${targetModelName}`);
+    } else {
+      console.error(`❌ UI: Model "${targetModelName}" not found in dropdown.`);
+      trigger.click(); // ferme le dropdown si rien trouvé
+    }
+    await new Promise(r => setTimeout(r, 800));
+  }
+
+  // ✅ NOUVEAU : switch Fast <-> Think/Thinking
+  async function switchReasoningModeInUI(targetMode) {
+    // targetMode = "Fast" ou "Think"
+    const labels = targetMode === "Fast" ? ["Fast"] : ["Think", "Thinking"];
+
+    // Évite un clic inutile si on est déjà dans le bon mode
+    const currentText = document.querySelector(".ant-select-selector .ant-select-selection-item")?.textContent?.trim();
+    if (currentText && labels.some(l => currentText.toLowerCase() === l.toLowerCase())) {
+      console.log(`✅ UI: Already in ${targetMode} mode`);
+      return;
+    }
+
+    const selector = document.querySelector(".ant-select-selector");
+    if (!selector) { console.error("❌ UI: Reasoning mode selector not found."); return; }
+
+    selector.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    await new Promise(r => setTimeout(r, 250));
+
+    const option = [...document.querySelectorAll(".ant-select-item-option")]
+      .find(el => labels.some(label => el.textContent.trim().toLowerCase() === label.toLowerCase()));
+
+    if (!option) {
+      console.error(`❌ UI: Option "${targetMode}" not found. Available:`,
+        [...document.querySelectorAll(".ant-select-item-option")].map(el => el.textContent.trim()));
+      selector.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window })); // ferme le dropdown
+      return;
+    }
+
+    option.click();
+    console.log(`✅ UI: Reasoning mode switched to: ${option.textContent.trim()}`);
+    await new Promise(r => setTimeout(r, 500));
+  }
+
   setInterval(async () => {
     try {
       const res = await fetch(`${SERVER_URL}/pending-command`);
       const data = await res.json();
-      if (data.action === "send_prompt") { startWatchdog(); typeAndSend(data.prompt); }
+
+      if (data.action === "send_prompt") {
+        startWatchdog();
+        typeAndSend(data.prompt);
+      } else if (data.action === "switch_model") {
+        await switchModelInUI(data.model);
+      } else if (data.action === "switch_reasoning_mode") {
+        await switchReasoningModeInUI(data.mode);
+      }
     } catch (e) {}
   }, 1000);
 
@@ -103,7 +169,6 @@
       const myGenId = ++currentGenerationId;
       console.log(`🆕 [JS] Stream intercepted, genId=${myGenId}`);
 
-      // ✅ THINKING INSTANTANÉ : envoyer un reasoning visible AVANT de lire le stream
       fetch(`${SERVER_URL}/qwen-stream`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "reasoning", text: "⏳" })
@@ -130,8 +195,6 @@
     let lastReasoningString = "";
     let lastUpstreamContent = "";
     let isCumulative = null;
-
-    // ✅ Flag tool call : une fois vrai, on IGNORE tout contenu texte (c'est le JSON du tool call qui fuit)
     let toolCallDetected = false;
 
     startFlushing();
@@ -158,7 +221,6 @@
             const delta = parsed.choices?.[0]?.delta;
             if (!delta) continue;
 
-            // 🧠 REASONING
             if (delta?.phase === "thinking_summary") {
               isThinking = true;
               if (delta?.extra?.summary_thought?.content) {
@@ -179,14 +241,12 @@
               }
             }
 
-            // 🔧 TOOL CALLS NATIFS (tool_calls[] ou function_call)
             const toolCalls = delta?.tool_calls;
             const fnCall = delta?.function_call;
 
             if ((toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) || fnCall) {
               isThinking = false;
 
-              // ✅ Flush le contenu texte AVANT le tool call (texte introductif du modèle)
               if (contentBuffer.length > 0) {
                 fetch(`${SERVER_URL}/qwen-stream`, {
                   method: "POST", headers: { "Content-Type": "application/json" },
@@ -214,7 +274,6 @@
 
             if (isThinking && delta?.phase === "answer") isThinking = false;
 
-            // 📝 CONTENU NORMAL — IGNORÉ si un tool call a été détecté (c'est le JSON qui fuit)
             const upstreamContent = delta?.content;
             if (upstreamContent && typeof upstreamContent === 'string' && !isThinking && !toolCallDetected) {
               if (isCumulative === null && lastUpstreamContent.length > 0) {
@@ -235,5 +294,5 @@
     }
   }
 
-  console.log("✅ Bridge v4.9 ready.");
+  console.log("✅ Bridge v5.0 ready.");
 })();
